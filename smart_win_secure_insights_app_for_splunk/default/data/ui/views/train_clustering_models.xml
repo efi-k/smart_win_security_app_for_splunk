@@ -1,0 +1,454 @@
+<form version="1.1" theme="dark">
+  <label>Analyse Clusters</label>
+  <fieldset submitButton="true" autoRun="false">
+    <input type="dropdown" token="min_samples">
+      <label>Select Minimum Events in a Cluster:</label>
+      <choice value="3">3</choice>
+      <choice value="4">4</choice>
+      <choice value="5">5</choice>
+      <choice value="10">10</choice>
+      <choice value="15">15</choice>
+      <choice value="20">20</choice>
+      <choice value="30">30</choice>
+      <choice value="40">40</choice>
+      <choice value="50">50</choice>
+      <initialValue>20</initialValue>
+    </input>
+    <input type="dropdown" token="eps">
+      <label>Select Cluster Distance Sensitivty:</label>
+      <choice value="0.2">0.2</choice>
+      <choice value="0.3">0.3</choice>
+      <choice value="0.4">0.4</choice>
+      <choice value="0.5">0.5</choice>
+      <choice value="0.6">0.6</choice>
+      <choice value="0.7">0.7</choice>
+      <choice value="0.8">0.8</choice>
+      <choice value="0.9">0.9</choice>
+      <choice value="1">1</choice>
+      <initialValue>0.6</initialValue>
+    </input>
+    <input type="time" token="time">
+      <label>Select Time Range:</label>
+      <default>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <html>
+        <h1>Clustering Analysis Results</h1>
+      </html>
+    </panel>
+    <panel depends="$alwaysHide$">
+      <table>
+        <search id="base">
+          <query>$search$
+| fit NPR DayOfWeek from "EventCode"
+| eval NPR_actual="NPR_EventCode_".'DayOfWeek', NPR_EventCode=0
+| foreach NPR_EventCode_* [| eval NPR_EventCode=if(NPR_actual="&lt;&lt;FIELD&gt;&gt;",NPR_EventCode+&lt;&lt;FIELD&gt;&gt;,NPR_EventCode)]
+| fit NPR DayOfWeek from "host"
+| eval NPR_actual="NPR_host_".'DayOfWeek', NPR_host=0
+| foreach NPR_host_* [| eval NPR_host=if(NPR_actual="&lt;&lt;FIELD&gt;&gt;",NPR_host+&lt;&lt;FIELD&gt;&gt;,NPR_host)]
+| fit NPR DayOfWeek from "user"
+| eval NPR_actual="NPR_user_".'DayOfWeek', NPR_user=0
+| foreach NPR_user_* [| eval NPR_user=if(NPR_actual="&lt;&lt;FIELD&gt;&gt;",NPR_user+&lt;&lt;FIELD&gt;&gt;,NPR_user)]
+| fit NPR DayOfWeek from key
+| eval NPR_actual="NPR_key_".'DayOfWeek', NPR_key=0
+| foreach NPR_key_* [| eval NPR_key=if(NPR_actual="&lt;&lt;FIELD&gt;&gt;",NPR_key+&lt;&lt;FIELD&gt;&gt;,NPR_key)]
+| fit StandardScaler count NPR_EventCode NPR_host NPR_user NPR_key
+| fit PCA k=2 SS_*
+| fit DBSCAN PC_* eps=$eps$ min_samples=$min_samples$
+| eval cluster=if(cluster=-1,"outlier",cluster)</query>
+          <earliest>$time.earliest$</earliest>
+          <latest>$time.latest$</latest>
+        </search>
+        <option name="count">10</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <viz type="Splunk_ML_Toolkit.Scatter3dViz">
+        <title>Cluster Distribution (click on a data point to see more details)</title>
+        <search base="base">
+          <query>| table PC_* cluster _time
+| rename PC_1 as y PC_2 as z
+| eval x=_time, clusterId=cluster
+| table clusterId x y z cluster</query>
+        </search>
+        <option name="drilldown">true</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="trellis.enabled">0</option>
+        <option name="trellis.scales.shared">1</option>
+        <option name="trellis.size">medium</option>
+        <drilldown>
+          <set token="x">$row.x$</set>
+          <set token="y">$row.y$</set>
+          <set token="z">$row.z$</set>
+          <unset token="cluster"></unset>
+          <unset token="s_user"></unset>
+          <unset token="s_host"></unset>
+          <unset token="s_time"></unset>
+        </drilldown>
+      </viz>
+    </panel>
+    <panel>
+      <chart>
+        <title>Cluster Activity over Time</title>
+        <search base="base">
+          <query>| timechart span=1d count by cluster useother=f</query>
+        </search>
+        <option name="charting.axisY2.enabled">1</option>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.overlayFields">outlier</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.legend.placement">top</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+      <table>
+        <title>Cluster Summaries</title>
+        <search base="base">
+          <query>| stats count dc(EventCode) as DistinctEventCodes dc(host) as DistinctHosts values(Day) as DaysOfWeek by cluster
+| nomv DaysOfWeek</query>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <drilldown>
+          <set token="cluster">$row.cluster$</set>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel depends="$x$,$y$,$z$">
+      <html>
+        <h1>Analysis of Selected Point</h1>
+      </html>
+    </panel>
+  </row>
+  <row>
+    <panel depends="$x$,$y$,$z$">
+      <table>
+        <title>Selected Point(s)</title>
+        <search base="base">
+          <query>| table cluster PC_* _time DayOfWeek count "EventCode" "host" "user"  | search PC_1=$y$ PC_2=$z$ _time=$x$
+| lookup eventcode_lookup.csv EventCode as "EventCode" OUTPUTNEW Description as EventCode_Description
+| table _time DayOfWeek count "host" "user" "EventCode" EventCode_Description</query>
+        </search>
+        <option name="count">10</option>
+        <option name="drilldown">cell</option>
+        <drilldown>
+          <link target="_blank">/app/smart_win_secure_insights_app_for_splunk/analyse_host?form.time.earliest=$form.time.earliest$&amp;form.time.latest=$form.time.latest$&amp;form.s_host=$row.host$&amp;form.s_user=$row.user$&amp;form.s_time=$row._time$&amp;form.s_event_code=$row.EventCode$&amp;form.index=$index$</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel depends="$cluster$">
+      <html>
+        <h1>Analysis of Selected Cluster</h1>
+      </html>
+    </panel>
+  </row>
+  <row>
+    <panel depends="$cluster$">
+      <single>
+        <title>Selected Cluster</title>
+        <search>
+          <query>| makeresults | eval cluster="$cluster$" | table cluster</query>
+          <earliest>$earliest$</earliest>
+          <latest>$latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </single>
+      <single>
+        <title>Records in the Cluster</title>
+        <search base="base">
+          <query>| stats count by cluster | search cluster="$cluster$" | table count</query>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </single>
+      <single>
+        <title>Distinct Hosts in the Cluster</title>
+        <search base="base">
+          <query>| where cluster="$cluster$" | stats dc("host")</query>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </single>
+      <single>
+        <title>Distinct Event Codes in the Cluster</title>
+        <search base="base">
+          <query>| where cluster="$cluster$" | stats dc("EventCode")</query>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </single>
+    </panel>
+    <panel depends="$cluster$">
+      <chart>
+        <title>Cluster Activity over Time</title>
+        <search base="base">
+          <query>| where cluster="$cluster$"
+| timechart span=1d count as cluster_occurences sum(count) as raw_events</query>
+        </search>
+        <option name="charting.axisY2.enabled">1</option>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.overlayFields">cluster_occurences</option>
+        <option name="charting.drilldown">none</option>
+        <option name="charting.legend.placement">top</option>
+        <option name="height">251</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel depends="$cluster$">
+      <table>
+        <title>List of Records and their Likelihood in the Cluster</title>
+        <search base="base">
+          <query>| eventstats count as events avg(count) as avg_events stdev(count) as stdev_events by "host" "user" "EventCode"
+| search cluster="$cluster$"
+| table _time "host" "user" "EventCode" count avg_events stdev_events events
+| eval deviation_from_average=round(abs(avg_events-count)/stdev_events,2)
+| eval likelihood_analysis=case(events=1,"This is the only occurence of this event code on this host for this user",deviation_from_average&gt;4,"Event count is extremely far from the expected range",deviation_from_average&gt;3,"Event count is very far from the expected range",deviation_from_average&gt;2,"Event count is outside the expected range",deviation_from_average&gt;1,"Event count is just outside the expected range",1=1,"Event count is within the expected range"), analysis_confidence=case(events&gt;100,"High", events&gt;50, "Acceptable", events&gt;10, "Low", events=1,"Only occurence", 1=1, "Very low")
+| lookup eventcode_lookup.csv EventCode as "EventCode" OUTPUTNEW Description as EventCode_Description
+| table _time "EventCode" EventCode_Description host "user" count likelihood_analysis analysis_confidence</query>
+        </search>
+        <option name="count">10</option>
+        <option name="drilldown">cell</option>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="difference_from_average">
+          <colorPalette type="minMidMax" maxColor="#DC4E41" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax"></scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="difference_from_average">
+          <colorPalette type="minMidMax" maxColor="#DC4E41" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax"></scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="difference_from_average">
+          <colorPalette type="minMidMax" maxColor="#DC4E41" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax"></scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="difference_from_average">
+          <colorPalette type="minMidMax" maxColor="#DC4E41" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax"></scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="difference_from_average">
+          <colorPalette type="minMidMax" maxColor="#DC4E41" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax"></scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="difference_from_average">
+          <colorPalette type="minMidMax" maxColor="#DC4E41" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax"></scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="difference_from_average">
+          <colorPalette type="minMidMax" maxColor="#DC4E41" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax"></scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="difference_from_average">
+          <colorPalette type="minMidMax" maxColor="#DC4E41" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax"></scale>
+        </format>
+        <format type="color" field="analysis">
+          <colorPalette type="sharedList"></colorPalette>
+          <scale type="sharedCategory"></scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="difference_from_average">
+          <colorPalette type="minMidMax" maxColor="#DC4E41" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax"></scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="difference_from_average">
+          <colorPalette type="minMidMax" maxColor="#DC4E41" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax"></scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="difference_from_average">
+          <colorPalette type="minMidMax" maxColor="#DC4E41" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax"></scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="difference_from_average">
+          <colorPalette type="minMidMax" maxColor="#DC4E41" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax"></scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="difference_from_average">
+          <colorPalette type="minMidMax" maxColor="#DC4E41" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax"></scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="difference_from_average">
+          <colorPalette type="minMidMax" maxColor="#DC4E41" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax"></scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="difference_from_average">
+          <colorPalette type="minMidMax" maxColor="#DC4E41" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax"></scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="deviation_from_average">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41,#AF575A]</colorPalette>
+          <scale type="threshold">0,2,3</scale>
+        </format>
+        <format type="color" field="difference_from_average">
+          <colorPalette type="minMidMax" maxColor="#DC4E41" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax"></scale>
+        </format>
+        <format type="color" field="analysis">
+          <colorPalette type="sharedList"></colorPalette>
+          <scale type="sharedCategory"></scale>
+        </format>
+        <format type="color" field="analysis_confidence">
+          <colorPalette type="sharedList"></colorPalette>
+          <scale type="sharedCategory"></scale>
+        </format>
+        <format type="color" field="likelihood_analysis">
+          <colorPalette type="sharedList"></colorPalette>
+          <scale type="sharedCategory"></scale>
+        </format>
+        <drilldown>
+          <link target="_blank">/app/smart_win_secure_insights_app_for_splunk/analyse_host?form.time.earliest=$form.time.earliest$&amp;form.time.latest=$form.time.latest$&amp;form.index=$index$&amp;form.s_host=$row.host$&amp;form.s_user=$row.user$&amp;form.s_event_code=$row.EventCode$&amp;form.s_time=$row._time$</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel depends="$cluster$">
+      <viz type="sankey_diagram_app.sankey_diagram">
+        <title>Distribution of Hosts and Event Codes in the Data</title>
+        <search base="base">
+          <query>| where cluster="$cluster$"
+| stats count by host EventCode
+| lookup eventcode_lookup.csv EventCode as "EventCode" OUTPUTNEW Description as EventCode_Description
+| table host EventCode_Description count</query>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </viz>
+    </panel>
+  </row>
+</form>

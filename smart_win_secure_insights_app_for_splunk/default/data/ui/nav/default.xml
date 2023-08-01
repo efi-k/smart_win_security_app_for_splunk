@@ -1,0 +1,10 @@
+<nav search_view="search">
+  <view name="data_input" default='true' />
+  <collection label="other">
+  	<view name="search" />
+    <view name="datasets" />
+    <view name="reports" />
+    <view name="alerts" />
+    <view name="dashboards" />
+  </collection>
+</nav>

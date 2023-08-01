@@ -1,0 +1,8 @@
+Smart Windows Security Insights App for Splunk
+
+Contributors: Greg Ainslie-Malik, gainsliemalik@splunk.com, Efi Kaufman, Philipp Drieger
+
+This app is designed to provide a guided workflow for identifying unusual windows events through unsupervised anomaly detection.
+
+Prerequesites for this app:
+- Splunk Machine Learning Toolkit version 5 or above installed: https://splunkbase.splunk.com/app/2890/

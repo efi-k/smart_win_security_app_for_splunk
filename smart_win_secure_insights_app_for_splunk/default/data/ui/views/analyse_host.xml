@@ -1,0 +1,274 @@
+<form version="1.1" theme="dark">
+  <label>Analyse Selected Event</label>
+  <fieldset submitButton="false"></fieldset>
+  <row>
+    <panel>
+      <html>
+        <h1>Selected Event</h1>
+      </html>
+    </panel>
+  </row>
+  <row>
+    <panel depends="$alwaysHide$">
+      <input type="text" token="s_host">
+        <label>selected host</label>
+      </input>
+      <input type="text" token="s_user">
+        <label>selected user</label>
+      </input>
+      <input type="text" token="s_event_code">
+        <label>selected event</label>
+      </input>
+      <input type="text" token="s_time">
+        <label>selected time</label>
+      </input>
+      <input type="text" token="index">
+        <label>Select Index:</label>
+      </input>
+      <input type="time" token="time">
+        <label></label>
+        <default>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </default>
+      </input>
+    </panel>
+    <panel>
+      <table>
+        <title>Event Summary</title>
+        <search>
+          <query>| makeresults
+| eval "Event Time"="$s_time$", "Event Code"="$s_event_code$", "Affected Host"="$s_host$", "Affected User"="$s_user$"
+| lookup eventcode_lookup.csv EventCode as "Event Code" OUTPUTNEW Description as "Event Code Description"
+| table "Event Time" "Event Code" "Event Code Description" "Affected Host" "Affected User"</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="count">10</option>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+    <panel>
+      <event>
+        <title>Raw Event(s)</title>
+        <search>
+          <query>index=$index$ source="*WinEventLog:Security" host="$s_host$" user="$s_user$" EventCode=$s_event_code$</query>
+          <earliest>$time.earliest$</earliest>
+          <latest>$time.latest$</latest>
+        </search>
+        <option name="count">5</option>
+        <option name="list.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </event>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <html>
+        <h1>All Activity on This Host</h1>
+      </html>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <chart>
+        <title>Host Activity over Time (click and drag on the chart to drill down to a specific time window)</title>
+        <search>
+          <query>| tstats count as "Activity on Host" WHERE index=$index$ source="*WinEventLog:Security" host="$s_host$" BY _time span=1h</query>
+          <earliest>$time.earliest$</earliest>
+          <latest>$time.latest$</latest>
+        </search>
+        <search type="annotation">
+          <query>| makeresults
+| eval _time="$s_time$", annotation_label = "Selected event on host $s_host$ related to user $s_user$", annotation_category = "$s_event_code$"</query>
+          <earliest>$time.earliest$</earliest>
+          <latest>$time.latest$</latest>
+        </search>
+        <selection>
+          <set token="start">$start$</set>
+          <set token="end">$end$</set>
+        </selection>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="charting.legend.placement">top</option>
+        <option name="height">335</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <html>
+        <h1>User Activity on this Host</h1>
+      </html>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <input type="multiselect" token="f_code">
+        <label>Filter on Event Codes:</label>
+        <choice value="*">All</choice>
+        <initialValue>*</initialValue>
+        <delimiter>,</delimiter>
+        <fieldForLabel>EventCode</fieldForLabel>
+        <fieldForValue>EventCode</fieldForValue>
+        <search>
+          <query>index=$index$ source="*WinEventLog:Security" host="$s_host$" user="$s_user$" earliest=$start$ latest=$end$ | table EventCode | dedup EventCode</query>
+        </search>
+      </input>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <chart>
+        <title>User Activity on Host over Time</title>
+        <search id="user_base">
+          <query>index=$index$ source="*WinEventLog:Security" host="$s_host$" user="$s_user$" EventCode IN ($f_code$) earliest=$start$ latest=$end$ | timechart span=1h count by EventCode useother=f</query>
+          <earliest>$time.earliest$</earliest>
+          <latest>$time.latest$</latest>
+        </search>
+        <option name="charting.axisY.scale">linear</option>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="charting.legend.placement">top</option>
+        <option name="height">493</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <event>
+        <title>Raw User Events</title>
+        <search>
+          <query>index=$index$ source="*WinEventLog:Security" host="$s_host$" user="$s_user$" EventCode IN ($f_code$) earliest=$start$ latest=$end$</query>
+          <earliest>$earliest$</earliest>
+          <latest>$latest$</latest>
+        </search>
+        <option name="count">5</option>
+        <option name="refresh.display">progressbar</option>
+      </event>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <html>
+        <h1>Windows Events of Interest</h1>
+      </html>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <input type="dropdown" token="view">
+        <label>Select View:</label>
+        <fieldForLabel>label</fieldForLabel>
+        <fieldForValue>value</fieldForValue>
+        <search>
+          <query>| makeresults
+| eval label="All activity on this host", value="host=\"$s_host$\""
+| append [|makeresults | eval label="All activity for the selected user", value="user=\"$s_user$\""]</query>
+        </search>
+        <change>
+          <condition label="All activity on this host">
+            <set token="view_type">user</set>
+          </condition>
+          <condition label="All activity for the selected user">
+            <set token="view_type">host</set>
+          </condition>
+          <condition>
+            <unset token="view_type"></unset>
+          </condition>
+        </change>
+      </input>
+    </panel>
+    <panel depends="$view$">
+      <table>
+        <search>
+          <query>| makeresults | eval selected_$view$ | table selected_*</query>
+          <earliest>$earliest$</earliest>
+          <latest>$latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel depends="$view$">
+      <chart>
+        <title>Potentially Significant Events over Time</title>
+        <search base="base">
+          <query>| timechart span=1h count by type_of_event</query>
+        </search>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.legend.placement">top</option>
+        <option name="height">492</option>
+      </chart>
+    </panel>
+    <panel depends="$view$">
+      <viz type="sankey_diagram_app.sankey_diagram">
+        <title>Distribution of Activity</title>
+        <search>
+          <query>index=$index$ source="*WinEventLog:Security" $view$ earliest=$start$ latest=$end$
+| table _time user host EventCode
+| lookup eventcode_lookup.csv EventCode as "EventCode" OUTPUTNEW Description as EventCode_Description
+| stats count by $view_type$ EventCode_Description</query>
+          <earliest>$time.earliest$</earliest>
+          <latest>$time.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="height">497</option>
+        <option name="refresh.display">progressbar</option>
+      </viz>
+    </panel>
+  </row>
+  <row>
+    <panel depends="$alwaysHide$">
+      <event>
+        <search id="base">
+          <query>index=$index$ $view$ source="*WinEventLog:Security" (Logon_Type=2 OR Logon_Type=10 OR Logon_Type=11 Logon Type TaskCategory=Logon Audit Success) OR (4648 EventCode=4648) OR (EventCode=4698 OR EventCode=4700) OR "EventCode" IN (7045,7030,1056,10000, 10001, 10100, 20001, 20002, 20003, 24576, 24577, 24579, 4720,4722,4724, 4738,4728, 4732,1102) earliest=$start$ latest=$end$
+| search NOT Account_Name=*$ OR EventCode NOT 4648
+| eval type_of_event=case(EventCode=4648,"Potential Privilege Escalation",in(EventCode,7045,7030,1056,10000, 10001, 10100, 20001, 20002, 20003, 24576, 24577, 24579, 4720,4722,4724, 4738,4728, 4732,1102),"Potentially Interesting Event",in(EventCode,4698,4700),"Potential Persistence",1=1,"Potential Lateral Movement"), user=user</query>
+          <earliest>$time.earliest$</earliest>
+          <latest>$time.latest$</latest>
+        </search>
+        <option name="refresh.display">progressbar</option>
+      </event>
+    </panel>
+  </row>
+  <row>
+    <panel depends="$view$">
+      <table>
+        <title>List of Potentially Significant Events</title>
+        <search base="base">
+          <query>| table _time host user Account_Name EventCode type_of_event
+| eval Unprivileged_Account_Name=mvindex(Account_Name, 1)
+| table _time type_of_event host user Unprivileged_Account_Name EventCode
+| lookup eventcode_lookup.csv EventCode as "EventCode" OUTPUTNEW Description as EventCode_Description
+| eval start_time=_time-1, end_time=_time+1</query>
+        </search>
+        <fields>_time, type_of_event, host, user, Unprivileged_Account_Name, EventCode,  EventCode_Description</fields>
+        <option name="count">5</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <format type="color" field="type_of_event">
+          <colorPalette type="sharedList"></colorPalette>
+          <scale type="sharedCategory"></scale>
+        </format>
+        <drilldown>
+          <set token="c_user">$row.user$</set>
+          <set token="c_code">$row.EventCode$</set>
+          <set token="c_start">$row.start_time$</set>
+          <set token="c_end">$row.end_time$</set>
+        </drilldown>
+      </table>
+    </panel>
+    <panel depends="$view$,$c_code$,$c_user$">
+      <event>
+        <title>Selected Event(s)</title>
+        <search>
+          <query>index=$index$ user="$c_user$" EventCode="$c_code$" source="*WinEventLog:Security" earliest=$c_start$ latest=$c_end$</query>
+        </search>
+        <option name="refresh.display">progressbar</option>
+      </event>
+    </panel>
+  </row>
+</form>
